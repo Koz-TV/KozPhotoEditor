@@ -1,5 +1,10 @@
 # KozPhotoEditor (MVP)
 
+![License](https://img.shields.io/github/license/Koz-TV/KozPhotoEditor)
+![Tech](https://img.shields.io/badge/tauri-v2-24C8DB?logo=tauri&logoColor=white)
+![Tech](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white)
+![Tech](https://img.shields.io/badge/vite-7-646CFF?logo=vite&logoColor=white)
+
 Minimal, Rams‑inspired image editor focused on **crop**. One shared UI/logic codebase runs on:
 - **Web** (Vite build)
 - **macOS / Windows** desktop via **Tauri v2** wrapper
