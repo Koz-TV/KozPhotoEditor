@@ -408,6 +408,8 @@ const App = () => {
   return (
     <div
       className="app"
+      data-crop-active={Boolean(cropRect)}
+      data-crop-applied={Boolean(appliedCropRect)}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragEnter={handleDragEnter}

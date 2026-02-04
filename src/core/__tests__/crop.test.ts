@@ -45,6 +45,34 @@ describe('resizeCropRect', () => {
     expect(rect.x + rect.w).toBeLessThanOrEqual(200);
     expect(rect.y + rect.h).toBeLessThanOrEqual(120);
   });
+
+  it('square + symmetric keeps center and square', () => {
+    const rect = resizeCropRect(
+      baseRect,
+      'nw',
+      { x: -20, y: -10 },
+      { square: true, symmetric: true },
+      null,
+      true
+    );
+
+    expect(Math.round(rect.w)).toBe(Math.round(rect.h));
+    expect(Math.round(rect.x + rect.w / 2)).toBe(60);
+    expect(Math.round(rect.y + rect.h / 2)).toBe(35);
+  });
+
+  it('edge handle respects square by expanding perpendicular axis', () => {
+    const rect = resizeCropRect(
+      baseRect,
+      'e',
+      { x: 40, y: 0 },
+      { square: true, symmetric: false },
+      null,
+      true
+    );
+
+    expect(Math.round(rect.w)).toBe(Math.round(rect.h));
+  });
 });
 
 describe('rotateRect', () => {

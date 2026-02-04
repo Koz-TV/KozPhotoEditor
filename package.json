@@ -10,7 +10,9 @@
     "build:desktop": "tauri build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "lucide-react": "^0.563.0",
@@ -19,6 +21,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.58.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/cli": "^2.10.0",
     "@tauri-apps/plugin-dialog": "^2.6.0",

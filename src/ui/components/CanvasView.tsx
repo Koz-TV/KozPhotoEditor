@@ -651,6 +651,7 @@ export const CanvasView = ({
     <div className="canvas-wrap" ref={wrapperRef}>
       <canvas
         ref={canvasRef}
+        data-testid="editor-canvas"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

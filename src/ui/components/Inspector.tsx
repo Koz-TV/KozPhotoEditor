@@ -25,16 +25,19 @@ const NumberField = ({
   value,
   onChange,
   disabled,
+  testId,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
   disabled?: boolean;
+  testId?: string;
 }) => (
   <label className="field">
     <span>{label}</span>
     <input
       type="number"
+      data-testid={testId}
       value={Number.isFinite(value) ? Math.round(value) : ''}
       onChange={(event) => onChange(Number(event.target.value))}
       disabled={disabled}
@@ -138,6 +141,7 @@ export const Inspector = ({
                 label="X"
                 value={cropRect?.x ?? 0}
                 disabled={!cropRect}
+                testId="crop-x"
                 onChange={(value) =>
                   cropRect && setCropRect({ ...cropRect, x: value })
                 }
@@ -146,6 +150,7 @@ export const Inspector = ({
                 label="Y"
                 value={cropRect?.y ?? 0}
                 disabled={!cropRect}
+                testId="crop-y"
                 onChange={(value) =>
                   cropRect && setCropRect({ ...cropRect, y: value })
                 }
@@ -154,6 +159,7 @@ export const Inspector = ({
                 label="W"
                 value={cropRect?.w ?? 0}
                 disabled={!cropRect}
+                testId="crop-w"
                 onChange={(value) =>
                   cropRect && setCropRect({ ...cropRect, w: Math.max(1, value) })
                 }
@@ -162,6 +168,7 @@ export const Inspector = ({
                 label="H"
                 value={cropRect?.h ?? 0}
                 disabled={!cropRect}
+                testId="crop-h"
                 onChange={(value) =>
                   cropRect && setCropRect({ ...cropRect, h: Math.max(1, value) })
                 }
@@ -178,10 +185,15 @@ export const Inspector = ({
             </label>
 
             <div className="panel-actions">
-              <button className="btn" onClick={onResetCrop} disabled={!image}>
+              <button className="btn" onClick={onResetCrop} disabled={!image} data-testid="crop-reset">
                 Reset
               </button>
-              <button className="btn primary" onClick={onApplyCrop} disabled={!cropRect}>
+              <button
+                className="btn primary"
+                onClick={onApplyCrop}
+                disabled={!cropRect}
+                data-testid="crop-apply"
+              >
                 Apply crop
               </button>
             </div>
