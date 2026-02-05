@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Guide } from '../utils/snap';
 import { snapRect } from '../utils/snap';
-import type { Handle, Rect, Rotation, Vec2 } from '../../core/types';
+import type { Adjustments, Handle, Rect, Rotation, Vec2 } from '../../core/types';
 import {
   getOrientedSize,
   moveCropRect,
   resizeCropRect,
 } from '../../core/crop';
-import { clampRectEdges, rectFromPointsWithAspect } from '../../core/geometry';
-import type { LoadedImage, ViewState } from '../types';
+import { clampRectEdges, rectFromPointsWithAspect, rotatedBounds } from '../../core/geometry';
+import {
+  applyAdjustmentsToBitmap,
+  isDefaultAdjustments,
+  normalizeAdjustments,
+} from '../../core/adjustments';
+import type { LoadedImage, Tool, ViewState } from '../types';
 import { useResizeObserver } from '../utils/useResizeObserver';
 
 const HANDLE_SIZE = 8;
@@ -77,18 +82,24 @@ export type CanvasViewProps = {
   view: ViewState;
   onViewChange: (view: ViewState) => void;
   onViewportChange: (size: { width: number; height: number }) => void;
-  tool: 'crop' | 'rotate' | 'adjust';
+  tool: Tool;
   cropRect: Rect | null;
   setCropRect: (rect: Rect | null) => void;
   allowOutside: boolean;
   aspectRatio: number | null;
   rotation: Rotation;
+  straighten: number;
+  flipH: boolean;
+  flipV: boolean;
+  adjustments: Adjustments;
   appliedCropRect: Rect | null;
   isLoading: boolean;
   isDragging: boolean;
   errorMessage: string | null;
   onApplyCrop: () => void;
   isSpacePressed: boolean;
+  showGrid: boolean;
+  snapEnabled: boolean;
 };
 
 export const CanvasView = ({
@@ -102,20 +113,73 @@ export const CanvasView = ({
   allowOutside,
   aspectRatio,
   rotation,
+  straighten,
+  flipH,
+  flipV,
+  adjustments,
   appliedCropRect,
   isLoading,
   isDragging,
   errorMessage,
   onApplyCrop,
   isSpacePressed,
+  showGrid,
+  snapEnabled,
 }: CanvasViewProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const patternRef = useRef<CanvasPattern | null>(null);
+  const adjustedRef = useRef<ImageBitmap | null>(null);
   const [hoverHandle, setHoverHandle] = useState<Handle | null>(null);
   const [hoverInside, setHoverInside] = useState(false);
   const [guides, setGuides] = useState<Guide[]>([]);
+  const [adjustedBitmap, setAdjustedBitmap] = useState<ImageBitmap | null>(null);
+
+  useEffect(() => {
+    if (!snapEnabled) setGuides([]);
+  }, [snapEnabled]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const update = async () => {
+      if (!image) {
+        setAdjustedBitmap(null);
+        return;
+      }
+      const normalized = normalizeAdjustments(adjustments);
+      if (isDefaultAdjustments(normalized)) {
+        if (adjustedRef.current) {
+          adjustedRef.current.close?.();
+          adjustedRef.current = null;
+        }
+        setAdjustedBitmap(null);
+        return;
+      }
+
+      try {
+        const bitmap = await applyAdjustmentsToBitmap(image.bitmap, normalized);
+        if (cancelled) {
+          bitmap.close?.();
+          return;
+        }
+        if (adjustedRef.current) {
+          adjustedRef.current.close?.();
+        }
+        adjustedRef.current = bitmap;
+        setAdjustedBitmap(bitmap);
+      } catch (error) {
+        console.error('Failed to apply adjustments', error);
+        setAdjustedBitmap(null);
+      }
+    };
+
+    update();
+    return () => {
+      cancelled = true;
+    };
+  }, [image, adjustments]);
 
   const size = useResizeObserver(wrapperRef);
 
@@ -128,10 +192,15 @@ export const CanvasView = ({
     return getOrientedSize(image.width, image.height, rotation);
   }, [image, rotation]);
 
+  const displayBounds = useMemo(() => {
+    if (!image) return { w: 0, h: 0 };
+    return rotatedBounds(orientedSize.w, orientedSize.h, straighten);
+  }, [image, orientedSize.w, orientedSize.h, straighten]);
+
   const activeBounds = useMemo(() => {
     if (appliedCropRect) return appliedCropRect;
-    return { x: 0, y: 0, w: orientedSize.w, h: orientedSize.h };
-  }, [appliedCropRect, orientedSize.w, orientedSize.h]);
+    return { x: 0, y: 0, w: displayBounds.w, h: displayBounds.h };
+  }, [appliedCropRect, displayBounds.w, displayBounds.h]);
 
   const imageOrigin = useCallback(() => {
     const baseX = (size.width - activeBounds.w * view.zoom) / 2 + view.pan.x;
@@ -212,7 +281,7 @@ export const CanvasView = ({
     const screenPoint = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const imgPoint = screenToImage(screenPoint);
 
-    if (isSpacePressed) {
+    if (isSpacePressed || tool === 'hand') {
       dragRef.current = {
         type: 'panning',
         startScreen: screenPoint,
@@ -313,9 +382,13 @@ export const CanvasView = ({
         y: imgPoint.y - dragRef.current.startImg.y,
       };
       let next = moveCropRect(dragRef.current.startRect, delta, bounds, allowOutside);
-      const snapped = snapRect(next, bounds, threshold, 'move');
-      next = snapped.rect;
-      setGuides(snapped.guides);
+      if (snapEnabled) {
+        const snapped = snapRect(next, bounds, threshold, 'move');
+        next = snapped.rect;
+        setGuides(snapped.guides);
+      } else {
+        setGuides([]);
+      }
       setCropRect(next);
       return;
     }
@@ -338,9 +411,13 @@ export const CanvasView = ({
         bounds,
         allowOutside
       );
-      const snapped = snapRect(next, bounds, threshold, 'resize', dragRef.current.handle);
-      next = snapped.rect;
-      setGuides(snapped.guides);
+      if (snapEnabled) {
+        const snapped = snapRect(next, bounds, threshold, 'resize', dragRef.current.handle);
+        next = snapped.rect;
+        setGuides(snapped.guides);
+      } else {
+        setGuides([]);
+      }
       setCropRect(next);
       return;
     }
@@ -382,7 +459,7 @@ export const CanvasView = ({
   };
 
   const onDoubleClick = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!cropRect) return;
+    if (!cropRect || tool !== 'crop') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -401,7 +478,7 @@ export const CanvasView = ({
       return;
     }
 
-    if (isSpacePressed) {
+    if (isSpacePressed || tool === 'hand') {
       canvas.style.cursor = 'grab';
       return;
     }
@@ -494,28 +571,15 @@ export const CanvasView = ({
       ctx.clip();
     }
 
-    switch (rotation) {
-      case 0:
-        ctx.drawImage(image.bitmap, 0, 0);
-        break;
-      case 90:
-        ctx.translate(orientedSize.w, 0);
-        ctx.rotate(Math.PI / 2);
-        ctx.drawImage(image.bitmap, 0, 0);
-        break;
-      case 180:
-        ctx.translate(orientedSize.w, orientedSize.h);
-        ctx.rotate(Math.PI);
-        ctx.drawImage(image.bitmap, 0, 0);
-        break;
-      case 270:
-        ctx.translate(0, orientedSize.h);
-        ctx.rotate(-Math.PI / 2);
-        ctx.drawImage(image.bitmap, 0, 0);
-        break;
-      default:
-        ctx.drawImage(image.bitmap, 0, 0);
-    }
+    const renderBitmap = adjustedBitmap ?? image.bitmap;
+
+    ctx.save();
+    ctx.translate(displayBounds.w / 2, displayBounds.h / 2);
+    ctx.rotate((straighten * Math.PI) / 180);
+    ctx.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.drawImage(renderBitmap, -renderBitmap.width / 2, -renderBitmap.height / 2);
+    ctx.restore();
 
     ctx.restore();
 
@@ -574,25 +638,27 @@ export const CanvasView = ({
       }
       ctx.restore();
 
-      ctx.save();
-      ctx.strokeStyle = guide;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 4]);
-      const thirdsX = [rectScreen.x + rectScreen.w / 3, rectScreen.x + (2 * rectScreen.w) / 3];
-      const thirdsY = [rectScreen.y + rectScreen.h / 3, rectScreen.y + (2 * rectScreen.h) / 3];
-      for (const gx of thirdsX) {
-        ctx.beginPath();
-        ctx.moveTo(gx, rectScreen.y);
-        ctx.lineTo(gx, rectScreen.y + rectScreen.h);
-        ctx.stroke();
+      if (showGrid) {
+        ctx.save();
+        ctx.strokeStyle = guide;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 4]);
+        const thirdsX = [rectScreen.x + rectScreen.w / 3, rectScreen.x + (2 * rectScreen.w) / 3];
+        const thirdsY = [rectScreen.y + rectScreen.h / 3, rectScreen.y + (2 * rectScreen.h) / 3];
+        for (const gx of thirdsX) {
+          ctx.beginPath();
+          ctx.moveTo(gx, rectScreen.y);
+          ctx.lineTo(gx, rectScreen.y + rectScreen.h);
+          ctx.stroke();
+        }
+        for (const gy of thirdsY) {
+          ctx.beginPath();
+          ctx.moveTo(rectScreen.x, gy);
+          ctx.lineTo(rectScreen.x + rectScreen.w, gy);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
-      for (const gy of thirdsY) {
-        ctx.beginPath();
-        ctx.moveTo(rectScreen.x, gy);
-        ctx.lineTo(rectScreen.x + rectScreen.w, gy);
-        ctx.stroke();
-      }
-      ctx.restore();
 
       ctx.save();
       ctx.fillStyle = handleFill;
@@ -637,12 +703,17 @@ export const CanvasView = ({
     image,
     view.zoom,
     view.pan,
-    orientedSize,
+    displayBounds,
     activeBounds,
     cropRect,
     allowOutside,
     guides,
     rotation,
+    straighten,
+    flipH,
+    flipV,
+    showGrid,
+    adjustedBitmap,
     imageOrigin,
     appliedCropRect,
   ]);

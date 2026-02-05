@@ -59,6 +59,7 @@
   justify-content: center;
   cursor: pointer;
   transition: all 0.2s ease;
+  position: relative;
 }
 
 .tool-btn:hover {
@@ -74,6 +75,17 @@
 .tool-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.tool-badge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--toolbar-bg);
 }
 
 .canvas-wrap {
@@ -176,6 +188,18 @@
   color: var(--muted);
 }
 
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 .field input,
 .field select {
   height: 32px;
@@ -206,6 +230,7 @@
 .panel-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .btn {
@@ -282,6 +307,13 @@
   background: transparent;
   color: var(--text);
   cursor: pointer;
+}
+
+.icon-btn.text {
+  width: auto;
+  padding: 0 8px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
 
 .icon-btn:hover {

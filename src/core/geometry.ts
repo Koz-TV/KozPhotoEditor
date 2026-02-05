@@ -71,3 +71,13 @@ export const clampRectEdges = (rect: Rect, bounds: Rect): Rect => {
 
   return { x: left, y: top, w, h };
 };
+
+export const rotatedBounds = (width: number, height: number, angleDeg: number) => {
+  const radians = (angleDeg * Math.PI) / 180;
+  const sin = Math.abs(Math.sin(radians));
+  const cos = Math.abs(Math.cos(radians));
+  return {
+    w: width * cos + height * sin,
+    h: width * sin + height * cos,
+  };
+};

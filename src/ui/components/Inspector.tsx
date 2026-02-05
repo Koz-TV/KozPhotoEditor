@@ -1,11 +1,13 @@
 import type { Rect } from '../../core/types';
-import type { LoadedImage, Tool } from '../types';
+import type { AspectPreset, LoadedImage, Tool } from '../types';
 
-const AspectOptions = [
+const AspectOptions: { label: string; value: AspectPreset }[] = [
   { label: 'Free', value: 'free' },
-  { label: '1:1', value: '1' },
-  { label: '4:3', value: '1.3333' },
-  { label: '16:9', value: '1.7778' },
+  { label: '1:1', value: '1:1' },
+  { label: '3:2', value: '3:2' },
+  { label: '4:3', value: '4:3' },
+  { label: '16:9', value: '16:9' },
+  { label: 'Custom', value: 'custom' },
 ];
 
 const formatBytes = (bytes: number) => {
@@ -50,14 +52,33 @@ export type InspectorProps = {
   image: LoadedImage | null;
   cropRect: Rect | null;
   setCropRect: (rect: Rect | null) => void;
-  aspectRatio: number | null;
-  setAspectRatio: (value: number | null) => void;
+  aspectPreset: AspectPreset;
+  onAspectPresetChange: (value: AspectPreset) => void;
+  customAspect: { w: number; h: number };
+  onCustomAspectChange: (value: { w: number; h: number }) => void;
   allowOutside: boolean;
   setAllowOutside: (value: boolean) => void;
+  showGrid: boolean;
+  setShowGrid: (value: boolean) => void;
+  snapEnabled: boolean;
+  setSnapEnabled: (value: boolean) => void;
   onApplyCrop: () => void;
   onResetCrop: () => void;
   onRotateLeft: () => void;
   onRotateRight: () => void;
+  straighten: number;
+  onStraightenChange: (value: number) => void;
+  onBeginStraighten: () => void;
+  onEndStraighten: () => void;
+  flipH: boolean;
+  flipV: boolean;
+  onFlipH: () => void;
+  onFlipV: () => void;
+  adjustments: { brightness: number; contrast: number; curve: number };
+  onAdjustmentsChange: (value: Partial<{ brightness: number; contrast: number; curve: number }>) => void;
+  onBeginAdjust: () => void;
+  onEndAdjust: () => void;
+  onResetAdjustments: () => void;
   exportFormat: 'image/png' | 'image/jpeg' | 'image/webp';
   setExportFormat: (value: 'image/png' | 'image/jpeg' | 'image/webp') => void;
   jpegQuality: number;
@@ -71,14 +92,33 @@ export const Inspector = ({
   image,
   cropRect,
   setCropRect,
-  aspectRatio,
-  setAspectRatio,
+  aspectPreset,
+  onAspectPresetChange,
+  customAspect,
+  onCustomAspectChange,
   allowOutside,
   setAllowOutside,
+  showGrid,
+  setShowGrid,
+  snapEnabled,
+  setSnapEnabled,
   onApplyCrop,
   onResetCrop,
   onRotateLeft,
   onRotateRight,
+  straighten,
+  onStraightenChange,
+  onBeginStraighten,
+  onEndStraighten,
+  flipH,
+  flipV,
+  onFlipH,
+  onFlipV,
+  adjustments,
+  onAdjustmentsChange,
+  onBeginAdjust,
+  onEndAdjust,
+  onResetAdjustments,
   exportFormat,
   setExportFormat,
   jpegQuality,
@@ -121,11 +161,10 @@ export const Inspector = ({
             <label className="field">
               <span>Aspect ratio</span>
               <select
-                value={aspectRatio ? aspectRatio.toString() : 'free'}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setAspectRatio(value === 'free' ? null : Number(value));
-                }}
+                value={aspectPreset}
+                onChange={(event) =>
+                  onAspectPresetChange(event.target.value as AspectPreset)
+                }
                 disabled={!image}
               >
                 {AspectOptions.map((option) => (
@@ -135,6 +174,27 @@ export const Inspector = ({
                 ))}
               </select>
             </label>
+
+            {aspectPreset === 'custom' && (
+              <div className="field-grid">
+                <NumberField
+                  label="Ratio W"
+                  value={customAspect.w}
+                  disabled={!image}
+                  onChange={(value) =>
+                    onCustomAspectChange({ ...customAspect, w: Math.max(1, value) })
+                  }
+                />
+                <NumberField
+                  label="Ratio H"
+                  value={customAspect.h}
+                  disabled={!image}
+                  onChange={(value) =>
+                    onCustomAspectChange({ ...customAspect, h: Math.max(1, value) })
+                  }
+                />
+              </div>
+            )}
 
             <div className="field-grid">
               <NumberField
@@ -179,9 +239,28 @@ export const Inspector = ({
               <input
                 type="checkbox"
                 checked={allowOutside}
+                disabled={!image}
                 onChange={(event) => setAllowOutside(event.target.checked)}
               />
               <span>Allow outside bounds</span>
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={snapEnabled}
+                disabled={!image}
+                onChange={(event) => setSnapEnabled(event.target.checked)}
+              />
+              <span>Snap to guides</span>
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={showGrid}
+                disabled={!image}
+                onChange={(event) => setShowGrid(event.target.checked)}
+              />
+              <span>Show thirds grid</span>
             </label>
 
             <div className="panel-actions">
@@ -213,11 +292,45 @@ export const Inspector = ({
                 Rotate 90° Right
               </button>
             </div>
+            <div className="panel-actions">
+              <button
+                className="btn"
+                onClick={onFlipH}
+                disabled={!image}
+                aria-pressed={flipH}
+              >
+                Flip Horizontal
+              </button>
+              <button
+                className="btn"
+                onClick={onFlipV}
+                disabled={!image}
+                aria-pressed={flipV}
+              >
+                Flip Vertical
+              </button>
+            </div>
             <label className="field">
-              <span>Straighten</span>
-              <input type="range" min={-15} max={15} disabled />
+              <div className="field-row">
+                <span>Straighten</span>
+                <span className="field-value">{straighten.toFixed(1)}°</span>
+              </div>
+              <input
+                type="range"
+                min={-15}
+                max={15}
+                step={0.1}
+                value={straighten}
+                disabled={!image}
+                onPointerDown={onBeginStraighten}
+                onPointerUp={onEndStraighten}
+                onPointerCancel={onEndStraighten}
+                onBlur={onEndStraighten}
+                onKeyDown={onBeginStraighten}
+                onKeyUp={onEndStraighten}
+                onChange={(event) => onStraightenChange(Number(event.target.value))}
+              />
             </label>
-            <div className="muted">Straighten is reserved for a future update.</div>
           </div>
         </div>
       )}
@@ -225,8 +338,75 @@ export const Inspector = ({
       {tool === 'adjust' && (
         <div className="panel">
           <div className="panel-title">Adjustments</div>
-          <div className="panel-body muted">
-            Brightness / contrast / curves coming next. The pipeline is ready for extensions.
+          <div className="panel-body">
+            <label className="field">
+              <div className="field-row">
+                <span>Brightness</span>
+                <span className="field-value">{Math.round(adjustments.brightness * 100)}</span>
+              </div>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={adjustments.brightness}
+                disabled={!image}
+                onPointerDown={onBeginAdjust}
+                onPointerUp={onEndAdjust}
+                onPointerCancel={onEndAdjust}
+                onBlur={onEndAdjust}
+                onKeyDown={onBeginAdjust}
+                onKeyUp={onEndAdjust}
+                onChange={(event) => onAdjustmentsChange({ brightness: Number(event.target.value) })}
+              />
+            </label>
+            <label className="field">
+              <div className="field-row">
+                <span>Contrast</span>
+                <span className="field-value">{Math.round(adjustments.contrast * 100)}</span>
+              </div>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={adjustments.contrast}
+                disabled={!image}
+                onPointerDown={onBeginAdjust}
+                onPointerUp={onEndAdjust}
+                onPointerCancel={onEndAdjust}
+                onBlur={onEndAdjust}
+                onKeyDown={onBeginAdjust}
+                onKeyUp={onEndAdjust}
+                onChange={(event) => onAdjustmentsChange({ contrast: Number(event.target.value) })}
+              />
+            </label>
+            <label className="field">
+              <div className="field-row">
+                <span>Tone Curve</span>
+                <span className="field-value">{Math.round(adjustments.curve * 100)}</span>
+              </div>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.01}
+                value={adjustments.curve}
+                disabled={!image}
+                onPointerDown={onBeginAdjust}
+                onPointerUp={onEndAdjust}
+                onPointerCancel={onEndAdjust}
+                onBlur={onEndAdjust}
+                onKeyDown={onBeginAdjust}
+                onKeyUp={onEndAdjust}
+                onChange={(event) => onAdjustmentsChange({ curve: Number(event.target.value) })}
+              />
+            </label>
+            <div className="panel-actions">
+              <button className="btn" onClick={onResetAdjustments} disabled={!image}>
+                Reset Adjustments
+              </button>
+            </div>
           </div>
         </div>
       )}

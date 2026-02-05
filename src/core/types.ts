@@ -12,9 +12,19 @@ export type CropModifiers = {
   aspectRatio?: number | null;
 };
 
+export type Adjustments = {
+  brightness: number;
+  contrast: number;
+  curve: number;
+};
+
 export type TransformState = {
   cropRect: Rect | null;
   rotation: Rotation;
+  straighten: number;
+  flipH: boolean;
+  flipV: boolean;
+  adjustments: Adjustments;
 };
 
 export type HistoryState<T> = {

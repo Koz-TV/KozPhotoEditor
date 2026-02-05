@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { TransformState } from '../types';
 import { createHistory, pushHistory, redoHistory, undoHistory } from '../history';
 
-const base: TransformState = { cropRect: null, rotation: 0 };
+const base: TransformState = {
+  cropRect: null,
+  rotation: 0,
+  straighten: 0,
+  flipH: false,
+  flipV: false,
+  adjustments: { brightness: 0, contrast: 0, curve: 0 },
+};
 
 describe('history', () => {
   it('push/undo/redo for crop', () => {

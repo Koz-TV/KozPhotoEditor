@@ -2,9 +2,13 @@ import {
   Crop,
   Download,
   FolderOpen,
+  Hand,
+  Redo2,
+  RefreshCcw,
   RotateCcw,
   RotateCw,
   Sliders,
+  Undo2,
 } from 'lucide-react';
 import type { Tool } from '../types';
 
@@ -12,11 +16,13 @@ const ToolButton = ({
   active,
   label,
   onClick,
+  badge,
   children,
 }: {
   active?: boolean;
   label: string;
   onClick: () => void;
+  badge?: boolean;
   children: React.ReactNode;
 }) => (
   <button
@@ -26,6 +32,7 @@ const ToolButton = ({
     title={label}
   >
     {children}
+    {badge ? <span className="tool-badge" /> : null}
   </button>
 );
 
@@ -36,6 +43,12 @@ export type ToolbarProps = {
   onExport: () => void;
   onRotateLeft: () => void;
   onRotateRight: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onResetAdjustments: () => void;
+  adjustmentsActive: boolean;
   canExport: boolean;
 };
 
@@ -46,6 +59,12 @@ export const Toolbar = ({
   onExport,
   onRotateLeft,
   onRotateRight,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  onResetAdjustments,
+  adjustmentsActive,
   canExport,
 }: ToolbarProps) => {
   return (
@@ -77,6 +96,13 @@ export const Toolbar = ({
           <Crop size={18} />
         </ToolButton>
         <ToolButton
+          active={tool === 'hand'}
+          label="Hand"
+          onClick={() => onToolChange('hand')}
+        >
+          <Hand size={18} />
+        </ToolButton>
+        <ToolButton
           active={tool === 'rotate'}
           label="Rotate"
           onClick={() => onToolChange('rotate')}
@@ -87,6 +113,7 @@ export const Toolbar = ({
           active={tool === 'adjust'}
           label="Adjust"
           onClick={() => onToolChange('adjust')}
+          badge={adjustmentsActive}
         >
           <Sliders size={18} />
         </ToolButton>
@@ -95,6 +122,30 @@ export const Toolbar = ({
       <div className="toolbar-divider" />
 
       <div className="toolbar-actions">
+        <button
+          className="tool-btn"
+          onClick={onUndo}
+          title="Undo"
+          disabled={!canUndo}
+        >
+          <Undo2 size={18} />
+        </button>
+        <button
+          className="tool-btn"
+          onClick={onRedo}
+          title="Redo"
+          disabled={!canRedo}
+        >
+          <Redo2 size={18} />
+        </button>
+        <button
+          className="tool-btn"
+          onClick={onResetAdjustments}
+          title="Reset Adjustments"
+          disabled={!adjustmentsActive}
+        >
+          <RefreshCcw size={18} />
+        </button>
         <button className="tool-btn" onClick={onRotateLeft} title="Rotate Left">
           <RotateCcw size={18} />
         </button>

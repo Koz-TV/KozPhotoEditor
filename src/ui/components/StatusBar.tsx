@@ -7,6 +7,8 @@ export type StatusBarProps = {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onZoomFit: () => void;
+  onZoomReset: () => void;
+  onZoom100: () => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
 };
@@ -17,6 +19,8 @@ export const StatusBar = ({
   onZoomIn,
   onZoomOut,
   onZoomFit,
+  onZoomReset,
+  onZoom100,
   theme,
   onToggleTheme,
 }: StatusBarProps) => {
@@ -30,7 +34,7 @@ export const StatusBar = ({
           </span>
         )}
         <span className="status-hint">
-          Shift: Square · Option/Alt: Symmetric · Space: Pan · Enter: Apply · Esc: Reset
+          Shift: Square · Option/Alt: Symmetric · Space: Pan · H: Hand · Enter: Apply · Esc: Reset
         </span>
       </div>
       <div className="status-right">
@@ -40,8 +44,14 @@ export const StatusBar = ({
         <button className="icon-btn" onClick={onZoomIn} title="Zoom In">
           <Plus size={14} />
         </button>
+        <button className="icon-btn text" onClick={onZoom100} title="Actual Size">
+          100%
+        </button>
         <button className="icon-btn" onClick={onZoomFit} title="Fit to Screen">
           <Maximize2 size={14} />
+        </button>
+        <button className="icon-btn text" onClick={onZoomReset} title="Reset View">
+          Reset
         </button>
         <div className="status-divider" />
         <button className="icon-btn" onClick={onToggleTheme} title="Toggle Theme">

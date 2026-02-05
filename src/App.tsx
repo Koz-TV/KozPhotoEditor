@@ -5,11 +5,12 @@ import { Inspector } from './ui/components/Inspector';
 import { StatusBar } from './ui/components/StatusBar';
 import { Toolbar } from './ui/components/Toolbar';
 import type { Rect, Rotation, TransformState } from './core/types';
-import { clampRectEdges } from './core/geometry';
+import { clampRectEdges, rotatedBounds } from './core/geometry';
 import { createHistory, pushHistory, redoHistory, undoHistory } from './core/history';
 import { getOrientedSize, rotateRect } from './core/crop';
 import { exportTransformedImage, type ExportFormat } from './core/transform';
-import type { LoadedImage, Tool, ViewState } from './ui/types';
+import { isDefaultAdjustments, normalizeAdjustments } from './core/adjustments';
+import type { AspectPreset, LoadedImage, Tool, ViewState } from './ui/types';
 import { isTauri } from './platform/fileIO';
 import { loadImageFromFile } from './platform/image';
 import { downloadBlob } from './platform/webFileIO';
@@ -18,6 +19,10 @@ import { loadImageFromPath, openImageDialog, saveExportDialog } from './platform
 const initialTransform: TransformState = {
   cropRect: null,
   rotation: 0,
+  straighten: 0,
+  flipH: false,
+  flipV: false,
+  adjustments: { brightness: 0, contrast: 0, curve: 0 },
 };
 
 const normalizeRotation = (rotation: number): Rotation => {
@@ -33,6 +38,15 @@ const getDefaultExportName = (name: string | undefined, format: ExportFormat) =>
   return `${base}.${ext}`;
 };
 
+const ASPECT_PRESETS: Record<AspectPreset, number | null> = {
+  free: null,
+  '1:1': 1,
+  '3:2': 3 / 2,
+  '4:3': 4 / 3,
+  '16:9': 16 / 9,
+  custom: null,
+};
+
 const App = () => {
   const [tool, setTool] = useState<Tool>('crop');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -40,9 +54,12 @@ const App = () => {
   const [history, setHistory] = useState(() => createHistory(initialTransform));
   const [cropRect, setCropRectState] = useState<Rect | null>(null);
   const [allowOutside, setAllowOutside] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<number | null>(null);
+  const [aspectPreset, setAspectPreset] = useState<AspectPreset>('free');
+  const [customAspect, setCustomAspect] = useState({ w: 3, h: 2 });
   const [view, setView] = useState<ViewState>({ zoom: 1, pan: { x: 0, y: 0 } });
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  const [showGrid, setShowGrid] = useState(true);
+  const [snapEnabled, setSnapEnabled] = useState(true);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -52,17 +69,42 @@ const App = () => {
   const [jpegQuality, setJpegQuality] = useState(0.92);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
+  const adjustBaseRef = useRef<TransformState | null>(null);
+  const straightenBaseRef = useRef<TransformState | null>(null);
 
-  const transform = history.present;
+  const transform = useMemo(() => {
+    const raw = history.present as TransformState & { adjustments?: TransformState['adjustments'] };
+    return {
+      ...raw,
+      adjustments: normalizeAdjustments(raw.adjustments),
+    };
+  }, [history.present]);
+  const aspectRatio = useMemo(() => {
+    if (aspectPreset === 'custom') {
+      const ratio = customAspect.w > 0 && customAspect.h > 0
+        ? customAspect.w / customAspect.h
+        : null;
+      return ratio && Number.isFinite(ratio) ? ratio : null;
+    }
+    return ASPECT_PRESETS[aspectPreset];
+  }, [aspectPreset, customAspect.h, customAspect.w]);
   const orientedSize = useMemo(() => {
     if (!image) return { w: 0, h: 0 };
     return getOrientedSize(image.width, image.height, transform.rotation);
   }, [image, transform.rotation]);
+  const displayBounds = useMemo(() => {
+    if (!image) return { w: 0, h: 0 };
+    return rotatedBounds(orientedSize.w, orientedSize.h, transform.straighten);
+  }, [image, orientedSize.w, orientedSize.h, transform.straighten]);
   const appliedCropRect = transform.cropRect;
   const displaySize = useMemo(() => {
     if (appliedCropRect) return { w: appliedCropRect.w, h: appliedCropRect.h };
-    return { w: orientedSize.w, h: orientedSize.h };
-  }, [appliedCropRect, orientedSize.w, orientedSize.h]);
+    return { w: displayBounds.w, h: displayBounds.h };
+  }, [appliedCropRect, displayBounds.w, displayBounds.h]);
+  const adjustmentsActive = useMemo(
+    () => !isDefaultAdjustments(transform.adjustments),
+    [transform.adjustments]
+  );
 
   const setCropRect = useCallback(
     (rect: Rect | null) => {
@@ -74,15 +116,15 @@ const App = () => {
         const bounds = appliedCropRect ?? {
           x: 0,
           y: 0,
-          w: orientedSize.w,
-          h: orientedSize.h,
+          w: displayBounds.w,
+          h: displayBounds.h,
         };
         setCropRectState(clampRectEdges(rect, bounds));
         return;
       }
       setCropRectState(rect);
     },
-    [allowOutside, image, orientedSize.w, orientedSize.h, appliedCropRect]
+    [allowOutside, image, displayBounds.w, displayBounds.h, appliedCropRect]
   );
 
   const resetImageState = useCallback((nextImage: LoadedImage) => {
@@ -90,7 +132,12 @@ const App = () => {
     setHistory(createHistory(initialTransform));
     setCropRectState(null);
     setAllowOutside(false);
-    setAspectRatio(null);
+    setAspectPreset('free');
+    setCustomAspect({ w: 3, h: 2 });
+    setShowGrid(true);
+    setSnapEnabled(true);
+    adjustBaseRef.current = null;
+    straightenBaseRef.current = null;
     setTool('crop');
     setLoadError(null);
   }, []);
@@ -124,12 +171,18 @@ const App = () => {
       const bounds = appliedCropRect ?? {
         x: 0,
         y: 0,
-        w: orientedSize.w,
-        h: orientedSize.h,
+        w: displayBounds.w,
+        h: displayBounds.h,
       };
       setCropRectState(clampRectEdges(cropRect, bounds));
     }
-  }, [allowOutside, cropRect, image, orientedSize.w, orientedSize.h, appliedCropRect]);
+  }, [allowOutside, cropRect, image, displayBounds.w, displayBounds.h, appliedCropRect]);
+
+  useEffect(() => {
+    if (appliedCropRect) {
+      fitToScreen();
+    }
+  }, [appliedCropRect, fitToScreen]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -246,22 +299,142 @@ const App = () => {
   const rotateBy = useCallback(
     (delta: 90 | -90) => {
       if (!image) return;
-      const current = history.present;
-      const oriented = getOrientedSize(image.width, image.height, current.rotation);
       const rotateDelta = delta === 90 ? 90 : 270;
-      const nextRotation = normalizeRotation(current.rotation + delta);
-      const nextCrop = current.cropRect
-        ? rotateRect(current.cropRect, rotateDelta as Rotation, oriented.w, oriented.h)
+      const nextRotation = normalizeRotation(transform.rotation + delta);
+      const nextCrop = transform.cropRect
+        ? rotateRect(transform.cropRect, rotateDelta as Rotation, displayBounds.w, displayBounds.h)
         : null;
       const nextDraft = cropRect
-        ? rotateRect(cropRect, rotateDelta as Rotation, oriented.w, oriented.h)
+        ? rotateRect(cropRect, rotateDelta as Rotation, displayBounds.w, displayBounds.h)
         : null;
 
-      setHistory((prev) => pushHistory(prev, { ...prev.present, rotation: nextRotation, cropRect: nextCrop }));
+      setHistory((prev) =>
+        pushHistory(prev, { ...prev.present, rotation: nextRotation, cropRect: nextCrop })
+      );
       setCropRectState(nextDraft);
     },
-    [image, history.present, cropRect]
+    [image, transform.rotation, transform.cropRect, cropRect, displayBounds.w, displayBounds.h]
   );
+
+  const beginAdjustments = useCallback(() => {
+    if (!adjustBaseRef.current) {
+      adjustBaseRef.current = history.present;
+    }
+  }, [history.present]);
+
+  const commitAdjustments = useCallback(() => {
+    setHistory((prev) => {
+      const base = adjustBaseRef.current;
+      adjustBaseRef.current = null;
+      if (!base) return prev;
+      const baseAdj = normalizeAdjustments(base.adjustments);
+      const nextAdj = normalizeAdjustments(prev.present.adjustments);
+      const same =
+        baseAdj.brightness === nextAdj.brightness &&
+        baseAdj.contrast === nextAdj.contrast &&
+        baseAdj.curve === nextAdj.curve;
+      if (same) return prev;
+      return {
+        past: [...prev.past, base],
+        present: prev.present,
+        future: [],
+      };
+    });
+  }, []);
+
+  const updateAdjustments = useCallback((updates: Partial<TransformState['adjustments']>) => {
+    if (!adjustBaseRef.current) {
+      adjustBaseRef.current = history.present;
+    }
+    setHistory((prev) => ({
+      past: prev.past,
+      present: {
+        ...prev.present,
+        adjustments: { ...normalizeAdjustments(prev.present.adjustments), ...updates },
+      },
+      future: [],
+    }));
+  }, [history.present]);
+
+  const resetAdjustments = useCallback(() => {
+    setHistory((prev) =>
+      pushHistory(prev, {
+        ...prev.present,
+        adjustments: { brightness: 0, contrast: 0, curve: 0 },
+      })
+    );
+  }, []);
+
+  const updateTransform = useCallback((updates: Partial<TransformState>) => {
+    setHistory((prev) => ({
+      past: prev.past,
+      present: {
+        ...prev.present,
+        adjustments: normalizeAdjustments(prev.present.adjustments),
+        ...updates,
+      },
+      future: [],
+    }));
+  }, []);
+
+  const beginStraighten = useCallback(() => {
+    if (!straightenBaseRef.current) {
+      straightenBaseRef.current = history.present;
+    }
+  }, [history.present]);
+
+  const commitStraighten = useCallback(() => {
+    setHistory((prev) => {
+      const base = straightenBaseRef.current;
+      straightenBaseRef.current = null;
+      if (!base) return prev;
+      if (base.straighten === prev.present.straighten) return prev;
+      return {
+        past: [...prev.past, base],
+        present: prev.present,
+        future: [],
+      };
+    });
+  }, []);
+
+  const handleStraightenChange = useCallback(
+    (value: number) => {
+      if (!straightenBaseRef.current) {
+        straightenBaseRef.current = history.present;
+      }
+      updateTransform({ straighten: value });
+    },
+    [history.present, updateTransform]
+  );
+
+  const handleFlipH = useCallback(() => {
+    setHistory((prev) =>
+      pushHistory(prev, { ...prev.present, flipH: !prev.present.flipH })
+    );
+  }, []);
+
+  const handleFlipV = useCallback(() => {
+    setHistory((prev) =>
+      pushHistory(prev, { ...prev.present, flipV: !prev.present.flipV })
+    );
+  }, []);
+
+  const handleAspectPresetChange = useCallback((value: AspectPreset) => {
+    setAspectPreset(value);
+  }, []);
+
+  const handleCustomAspectChange = useCallback((next: { w: number; h: number }) => {
+    setCustomAspect(next);
+    setAspectPreset('custom');
+  }, []);
+
+  const resetView = useCallback(() => {
+    setView((prev) => ({ ...prev, pan: { x: 0, y: 0 } }));
+  }, []);
+
+  const zoomTo100 = useCallback(() => {
+    setView({ zoom: 1, pan: { x: 0, y: 0 } });
+  }, []);
 
   const handleUndo = useCallback(() => {
     setHistory((prev) => {
@@ -269,6 +442,8 @@ const App = () => {
       setCropRectState(null);
       return next;
     });
+    adjustBaseRef.current = null;
+    straightenBaseRef.current = null;
   }, []);
 
   const handleRedo = useCallback(() => {
@@ -277,13 +452,15 @@ const App = () => {
       setCropRectState(null);
       return next;
     });
+    adjustBaseRef.current = null;
+    straightenBaseRef.current = null;
   }, []);
 
   const handleExport = useCallback(async () => {
     if (!image) return;
     const exportTransform = {
-      ...history.present,
-      cropRect: cropRect ?? history.present.cropRect,
+      ...transform,
+      cropRect: cropRect ?? transform.cropRect,
     };
     const blob = await exportTransformedImage({
       image: image.bitmap,
@@ -299,7 +476,7 @@ const App = () => {
     } else {
       await downloadBlob({ blob, defaultName, mimeType: exportFormat });
     }
-  }, [image, history.present, cropRect, exportFormat, jpegQuality]);
+  }, [image, transform, cropRect, exportFormat, jpegQuality]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -320,6 +497,12 @@ const App = () => {
       if (event.key === 'Enter') {
         if (tool === 'crop') {
           applyCrop();
+        }
+      }
+
+      if (!event.metaKey && !event.ctrlKey && !event.altKey) {
+        if (event.key.toLowerCase() === 'h') {
+          setTool('hand');
         }
       }
 
@@ -422,6 +605,12 @@ const App = () => {
         onExport={handleExport}
         onRotateLeft={() => rotateBy(-90)}
         onRotateRight={() => rotateBy(90)}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={history.past.length > 0}
+        canRedo={history.future.length > 0}
+        onResetAdjustments={resetAdjustments}
+        adjustmentsActive={adjustmentsActive}
         canExport={Boolean(image)}
       />
 
@@ -436,12 +625,18 @@ const App = () => {
         allowOutside={allowOutside}
         aspectRatio={aspectRatio}
         rotation={transform.rotation}
+        straighten={transform.straighten}
+        flipH={transform.flipH}
+        flipV={transform.flipV}
+        adjustments={transform.adjustments}
         appliedCropRect={appliedCropRect}
         isLoading={isLoading}
         isDragging={isDragging}
         errorMessage={loadError}
         onApplyCrop={applyCrop}
         isSpacePressed={isSpacePressed}
+        showGrid={showGrid}
+        snapEnabled={snapEnabled}
       />
 
       <Inspector
@@ -449,14 +644,33 @@ const App = () => {
         image={image}
         cropRect={cropRect ?? appliedCropRect}
         setCropRect={setCropRect}
-        aspectRatio={aspectRatio}
-        setAspectRatio={setAspectRatio}
+        aspectPreset={aspectPreset}
+        onAspectPresetChange={handleAspectPresetChange}
+        customAspect={customAspect}
+        onCustomAspectChange={handleCustomAspectChange}
         allowOutside={allowOutside}
         setAllowOutside={setAllowOutside}
+        showGrid={showGrid}
+        setShowGrid={setShowGrid}
+        snapEnabled={snapEnabled}
+        setSnapEnabled={setSnapEnabled}
         onApplyCrop={applyCrop}
         onResetCrop={resetCrop}
         onRotateLeft={() => rotateBy(-90)}
         onRotateRight={() => rotateBy(90)}
+        straighten={transform.straighten}
+        onStraightenChange={handleStraightenChange}
+        onBeginStraighten={beginStraighten}
+        onEndStraighten={commitStraighten}
+        flipH={transform.flipH}
+        flipV={transform.flipV}
+        onFlipH={handleFlipH}
+        onFlipV={handleFlipV}
+        adjustments={transform.adjustments}
+        onAdjustmentsChange={updateAdjustments}
+        onBeginAdjust={beginAdjustments}
+        onEndAdjust={commitAdjustments}
+        onResetAdjustments={resetAdjustments}
         exportFormat={exportFormat}
         setExportFormat={setExportFormat}
         jpegQuality={jpegQuality}
@@ -471,6 +685,8 @@ const App = () => {
         onZoomIn={() => setView((prev) => ({ ...prev, zoom: Math.min(prev.zoom * 1.1, 8) }))}
         onZoomOut={() => setView((prev) => ({ ...prev, zoom: Math.max(prev.zoom * 0.9, 0.1) }))}
         onZoomFit={fitToScreen}
+        onZoomReset={resetView}
+        onZoom100={zoomTo100}
         theme={theme}
         onToggleTheme={() => setTheme((prev) => (prev === 'light' ? 'dark' : 'light'))}
       />
